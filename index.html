@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>사각형 도시 설계자 (Quadrilateral City)</title>
+<style>
+  body { font-family: 'Malgun Gothic', sans-serif; margin: 0; padding: 20px; background: #f4f6f9; display: flex; flex-direction: column; align-items: center; }
+  h1 { margin: 0 0 10px 0; font-size: 24px; color: #2c3e50; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; justify-content: center; }
+  button { padding: 10px 14px; font-size: 14px; font-weight: bold; border: 2px solid #ccc; border-radius: 8px; cursor: pointer; background: #fff; transition: 0.2s; }
+  button.active { border-color: #2c3e50; background: #2c3e50; color: #fff; }
+  .status-box { width: 800px; max-width: 95vw; padding: 12px 16px; background: #fff; border-left: 6px solid #3498db; border-radius: 6px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); font-size: 15px; }
+  canvas { background: #fff; border: 2px solid #2c3e50; border-radius: 4px; cursor: crosshair; box-shadow: 0 4px 10px rgba(0,0,0,0.1); touch-action: none; }
+  .controls { margin-top: 12px; display: flex; gap: 10px; }
+</style>
+</head>
+<body>
+
+<h1>🏙️ 사각형 도시 설계자</h1>
+
+<div class="toolbar" id="building-buttons">
+  <button class="active" data-type="시청" data-shape="정사각형" data-color="rgba(231, 76, 60, 0.35)">🏛️ 시청 (정사각형)</button>
+  <button data-type="중앙 공원" data-shape="직사각형" data-color="rgba(46, 204, 113, 0.35)">🌳 중앙 공원 (직사각형)</button>
+  <button data-type="도서관" data-shape="사다리꼴" data-color="rgba(52, 152, 219, 0.35)">📚 도서관 (사다리꼴)</button>
+  <button data-type="미술관" data-shape="평행사변형" data-color="rgba(155, 89, 182, 0.35)">🎨 미술관 (평행사변형)</button>
+  <button data-type="도로" data-shape="자유" data-color="rgba(149, 165, 166, 0.5)">🛣️ 도로 (자유 다각형)</button>
+</div>
+
+<div class="status-box" id="feedback">
+  <strong>[시청 - 정사각형]</strong> 모눈의 교차점을 차례대로 4번 클릭해 도형을 완성하세요. (네 변의 길이가 같고 네 각이 직각)
+</div>
+
+<canvas id="gridCanvas" width="800" height="500"></canvas>
+
+<div class="controls">
+  <button onclick="undoLast()">↩️ 마지막 건물 지우기</button>
+  <button onclick="clearAll()">🗑️ 전체 초기화</button>
+  <button onclick="downloadImage()">💾 설계도 이미지 저장</button>
+</div>
+
+<script>
+const canvas = document.getElementById('gridCanvas');
+const ctx = canvas.getContext('2d');
+const GRID = 25; // 1칸 = 25px (1cm)
+
+let currentTool = { type: '시청', shape: '정사각형', color: 'rgba(231, 76, 60, 0.35)' };
+let currentPoints = [];
+let buildings = [];
+
+// 버튼 이벤트
+document.querySelectorAll('#building-buttons button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#building-buttons button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentTool = { type: btn.dataset.type, shape: btn.dataset.shape, color: btn.dataset.color };
+    currentPoints = [];
+    updateFeedback(`[${currentTool.type} - ${currentTool.shape}] 모눈 교차점 4개를 차례대로 클릭하세요.`, '#3498db');
+    draw();
+  });
+});
+
+function updateFeedback(msg, color) {
+  const box = document.getElementById('feedback');
+  box.innerHTML = msg;
+  box.style.borderLeftColor = color;
+}
+
+// 좌표 스냅
+function getSnapPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  const x = Math.round((clientX - rect.left) / GRID) * GRID;
+  const y = Math.round((clientY - rect.top) / GRID) * GRID;
+  return { x, y };
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  const pos = getSnapPos(e);
+  // 중복 점 방지
+  if (currentPoints.some(p => p.x === pos.x && p.y === pos.y)) return;
+  currentPoints.push(pos);
+
+  if (currentPoints.length === 4) {
+    const result = verifyQuadrilateral(currentPoints, currentTool.shape);
+    if (result.valid) {
+      buildings.push({ ...currentTool, points: [...currentPoints] });
+      updateFeedback(`✅ <strong>${currentTool.type}</strong> 건축 완료! (${result.message})`, '#2ecc71');
+    } else {
+      updateFeedback(`❌ <strong>건축 반려:</strong> ${result.message} 다시 그려보세요!`, '#e74c3c');
+    }
+    currentPoints = [];
+  }
+  draw();
+});
+
+// 사각형 성질 판별 로직
+function verifyQuadrilateral(pts, targetShape) {
+  if (targetShape === '자유') return { valid: true, message: '도로가 배치되었습니다.' };
+
+  // 변 벡터 및 길이 계산
+  const vecs = [];
+  const lens = [];
+  for (let i = 0; i < 4; i++) {
+    const p1 = pts[i];
+    const p2 = pts[(i + 1) % 4];
+    const dx = (p2.x - p1.x) / GRID;
+    const dy = (p2.y - p1.y) / GRID;
+    vecs.push({ dx, dy });
+    lens.push(Math.hypot(dx, dy));
+  }
+
+  // 외적(평행 판별), 내적(직각 판별)
+  const isParallel = (v1, v2) => Math.abs(v1.dx * v2.dy - v1.dy * v2.dx) < 1e-5;
+  const isPerp = (v1, v2) => Math.abs(v1.dx * v2.dx + v1.dy * v2.dy) < 1e-5;
+
+  const pair1Parallel = isParallel(vecs[0], vecs[2]);
+  const pair2Parallel = isParallel(vecs[1], vecs[3]);
+  const parallelPairs = (pair1Parallel ? 1 : 0) + (pair2Parallel ? 1 : 0);
+
+  const rightAngles = [0, 1, 2, 3].filter(i => isPerp(vecs[i], vecs[(i + 1) % 4])).length;
+  const allSidesEqual = lens.every(l => Math.abs(l - lens[0]) < 1e-5);
+
+  if (targetShape === '정사각형') {
+    if (rightAngles === 4 && allSidesEqual) return { valid: true, message: `한 변이 ${lens[0]}cm인 정사각형입니다.` };
+    return { valid: false, message: '네 변의 길이가 모두 같고 네 각이 직각이어야 합니다.' };
+  }
+  if (targetShape === '직사각형') {
+    if (rightAngles === 4 && !allSidesEqual) return { valid: true, message: `가로×세로가 다른 직사각형입니다.` };
+    if (allSidesEqual) return { valid: false, message: '네 변의 길이가 모두 같아 정사각형이 되었습니다. 가로와 세로 길이를 다르게 하세요.' };
+    return { valid: false, message: '네 각이 모두 직각이어야 합니다.' };
+  }
+  if (targetShape === '사다리꼴') {
+    if (parallelPairs === 1) return { valid: true, message: '평행한 변이 한 쌍만 있는 사다리꼴입니다.' };
+    if (parallelPairs === 2) return { valid: false, message: '평행한 변이 두 쌍이라 평행사변형이 되었습니다. 한 쌍만 평행하게 만드세요.' };
+    return { valid: false, message: '평행한 변이 한 쌍 있어야 합니다.' };
+  }
+  if (targetShape === '평행사변형') {
+    if (parallelPairs === 2 && rightAngles === 0) return { valid: true, message: '두 쌍의 변이 평행하고 직각이 없는 평행사변형입니다.' };
+    if (rightAngles > 0) return { valid: false, message: '직각이 없는 평행사변형으로 기울여 그려주세요.' };
+    return { valid: false, message: '마주 보는 두 쌍의 변이 모두 평행해야 합니다.' };
+  }
+  return { valid: true, message: '' };
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // 모눈 그리기
+  ctx.strokeStyle = '#e0e6ed';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= canvas.width; x += GRID) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y <= canvas.height; y += GRID) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+
+  // 완성된 건물 그리기
+  buildings.forEach(b => {
+    ctx.fillStyle = b.color;
+    ctx.strokeStyle = '#2c3e50';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    b.points.forEach((p, idx) => idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // 건물 이름 표시
+    const cx = b.points.reduce((s, p) => s + p.x, 0) / 4;
+    const cy = b.points.reduce((s, p) => s + p.y, 0) / 4;
+    ctx.fillStyle = '#2c3e50';
+    ctx.font = 'bold 13px Malgun Gothic';
+    ctx.textAlign = 'center';
+    ctx.fillText(b.type, cx, cy + 5);
+  });
+
+  // 현재 찍고 있는 점과 선
+  if (currentPoints.length > 0) {
+    ctx.strokeStyle = '#e67e22';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    currentPoints.forEach((p, idx) => idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.stroke();
+
+    currentPoints.forEach(p => {
+      ctx.fillStyle = '#e67e22';
+      ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+}
+
+function undoLast() { buildings.pop(); draw(); }
+function clearAll() { buildings = []; currentPoints = []; draw(); }
+function downloadImage() {
+  const link = document.createElement('a');
+  link.download = '사각형도시_설계도.png';
+  link.href = canvas.toDataURL();
+  link.click();
+}
+
+draw();
+</script>
+</body>
+</html>
