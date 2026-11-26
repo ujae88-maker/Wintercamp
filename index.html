@@ -10,9 +10,11 @@
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; justify-content: center; }
   button { padding: 10px 14px; font-size: 14px; font-weight: bold; border: 2px solid #ccc; border-radius: 8px; cursor: pointer; background: #fff; transition: 0.2s; }
   button.active { border-color: #2c3e50; background: #2c3e50; color: #fff; }
+  button.mode-btn { border-color: #e67e22; background: #fff8f0; color: #d35400; }
+  button.mode-btn.is-3d { border-color: #27ae60; background: #27ae60; color: #fff; }
   .status-box { width: 800px; max-width: 95vw; padding: 12px 16px; background: #fff; border-left: 6px solid #3498db; border-radius: 6px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); font-size: 15px; }
   canvas { background: #fff; border: 2px solid #2c3e50; border-radius: 4px; cursor: crosshair; box-shadow: 0 4px 10px rgba(0,0,0,0.1); touch-action: none; }
-  .controls { margin-top: 12px; display: flex; gap: 10px; }
+  .controls { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 </style>
 </head>
 <body>
@@ -20,11 +22,11 @@
 <h1>🏙️ 사각형 도시 설계자</h1>
 
 <div class="toolbar" id="building-buttons">
-  <button class="active" data-type="시청" data-shape="정사각형" data-color="rgba(231, 76, 60, 0.35)">🏛️ 시청 (정사각형)</button>
-  <button data-type="중앙 공원" data-shape="직사각형" data-color="rgba(46, 204, 113, 0.35)">🌳 중앙 공원 (직사각형)</button>
-  <button data-type="도서관" data-shape="사다리꼴" data-color="rgba(52, 152, 219, 0.35)">📚 도서관 (사다리꼴)</button>
-  <button data-type="미술관" data-shape="평행사변형" data-color="rgba(155, 89, 182, 0.35)">🎨 미술관 (평행사변형)</button>
-  <button data-type="도로" data-shape="자유" data-color="rgba(149, 165, 166, 0.5)">🛣️ 도로 (자유 다각형)</button>
+  <button class="active" data-type="시청" data-shape="정사각형" data-color="rgba(231, 76, 60, 0.35)" data-hex="#e74c3c" data-height="55">🏛️ 시청 (정사각형)</button>
+  <button data-type="중앙 공원" data-shape="직사각형" data-color="rgba(46, 204, 113, 0.35)" data-hex="#2ecc71" data-height="8">🌳 중앙 공원 (직사각형)</button>
+  <button data-type="도서관" data-shape="사다리꼴" data-color="rgba(52, 152, 219, 0.35)" data-hex="#3498db" data-height="42">📚 도서관 (사다리꼴)</button>
+  <button data-type="미술관" data-shape="평행사변형" data-color="rgba(155, 89, 182, 0.35)" data-hex="#9b59b6" data-height="38">🎨 미술관 (평행사변형)</button>
+  <button data-type="도로" data-shape="자유" data-color="rgba(149, 165, 166, 0.5)" data-hex="#7f8c8d" data-height="2">🛣️ 도로 (자유 다각형)</button>
 </div>
 
 <div class="status-box" id="feedback">
@@ -34,6 +36,7 @@
 <canvas id="gridCanvas" width="800" height="500"></canvas>
 
 <div class="controls">
+  <button id="toggleViewBtn" class="mode-btn" onclick="toggleViewMode()">🏙️ 입체 도시로 변신!</button>
   <button onclick="undoLast()">↩️ 마지막 건물 지우기</button>
   <button onclick="clearAll()">🗑️ 전체 초기화</button>
   <button onclick="downloadImage()">💾 설계도 이미지 저장</button>
@@ -44,18 +47,32 @@ const canvas = document.getElementById('gridCanvas');
 const ctx = canvas.getContext('2d');
 const GRID = 25; // 1칸 = 25px (1cm)
 
-let currentTool = { type: '시청', shape: '정사각형', color: 'rgba(231, 76, 60, 0.35)' };
+let currentTool = {
+  type: '시청',
+  shape: '정사각형',
+  color: 'rgba(231, 76, 60, 0.35)',
+  hex: '#e74c3c',
+  height: 55
+};
 let currentPoints = [];
 let buildings = [];
+let is3DMode = false;
 
-// 버튼 이벤트
+// 건물 선택 버튼 이벤트
 document.querySelectorAll('#building-buttons button').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (is3DMode) toggleViewMode(); // 건물 그릴 때는 자동으로 2D 설계 모드로 복귀
     document.querySelectorAll('#building-buttons button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    currentTool = { type: btn.dataset.type, shape: btn.dataset.shape, color: btn.dataset.color };
+    currentTool = {
+      type: btn.dataset.type,
+      shape: btn.dataset.shape,
+      color: btn.dataset.color,
+      hex: btn.dataset.hex,
+      height: Number(btn.dataset.height)
+    };
     currentPoints = [];
-    updateFeedback(`[${currentTool.type} - ${currentTool.shape}] 모눈 교차점 4개를 차례대로 클릭하세요.`, '#3498db');
+    updateFeedback(`[${currentTool.type} - ${currentTool.shape}] 모눈 교차점 4개를 클릭하세요.`, '#3498db');
     draw();
   });
 });
@@ -64,6 +81,25 @@ function updateFeedback(msg, color) {
   const box = document.getElementById('feedback');
   box.innerHTML = msg;
   box.style.borderLeftColor = color;
+}
+
+// 2D <-> 2.5D 입체 도시 모드 전환
+function toggleViewMode() {
+  is3DMode = !is3DMode;
+  const btn = document.getElementById('toggleViewBtn');
+  if (is3DMode) {
+    currentPoints = [];
+    btn.textContent = '📐 2D 모눈 설계로 돌아가기';
+    btn.classList.add('is-3d');
+    canvas.style.cursor = 'default';
+    updateFeedback('🏙️ <strong>입체 도시 조감도 모드!</strong> 내가 설계한 사각형 밑면 위로 건물들이 세워졌습니다.', '#27ae60');
+  } else {
+    btn.textContent = '🏙️ 입체 도시로 변신!';
+    btn.classList.remove('is-3d');
+    canvas.style.cursor = 'crosshair';
+    updateFeedback(`[${currentTool.type} - ${currentTool.shape}] 모눈 교차점 4개를 클릭해 도형을 이어서 설계하세요.`, '#3498db');
+  }
+  draw();
 }
 
 // 좌표 스냅
@@ -76,16 +112,24 @@ function getSnapPos(e) {
   return { x, y };
 }
 
+// 꼭짓점 4개를 시계 방향으로 자동 정렬 (초등학생 클릭 순서 꼬임 방지)
+function sortPointsClockwise(pts) {
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  return [...pts].sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+}
+
 canvas.addEventListener('pointerdown', (e) => {
+  if (is3DMode) return;
   const pos = getSnapPos(e);
-  // 중복 점 방지
   if (currentPoints.some(p => p.x === pos.x && p.y === pos.y)) return;
   currentPoints.push(pos);
 
   if (currentPoints.length === 4) {
-    const result = verifyQuadrilateral(currentPoints, currentTool.shape);
+    const sortedPts = sortPointsClockwise(currentPoints);
+    const result = verifyQuadrilateral(sortedPts, currentTool.shape);
     if (result.valid) {
-      buildings.push({ ...currentTool, points: [...currentPoints] });
+      buildings.push({ ...currentTool, points: sortedPts });
       updateFeedback(`✅ <strong>${currentTool.type}</strong> 건축 완료! (${result.message})`, '#2ecc71');
     } else {
       updateFeedback(`❌ <strong>건축 반려:</strong> ${result.message} 다시 그려보세요!`, '#e74c3c');
@@ -99,7 +143,6 @@ canvas.addEventListener('pointerdown', (e) => {
 function verifyQuadrilateral(pts, targetShape) {
   if (targetShape === '자유') return { valid: true, message: '도로가 배치되었습니다.' };
 
-  // 변 벡터 및 길이 계산
   const vecs = [];
   const lens = [];
   for (let i = 0; i < 4; i++) {
@@ -111,7 +154,6 @@ function verifyQuadrilateral(pts, targetShape) {
     lens.push(Math.hypot(dx, dy));
   }
 
-  // 외적(평행 판별), 내적(직각 판별)
   const isParallel = (v1, v2) => Math.abs(v1.dx * v2.dy - v1.dy * v2.dx) < 1e-5;
   const isPerp = (v1, v2) => Math.abs(v1.dx * v2.dx + v1.dy * v2.dy) < 1e-5;
 
@@ -127,8 +169,8 @@ function verifyQuadrilateral(pts, targetShape) {
     return { valid: false, message: '네 변의 길이가 모두 같고 네 각이 직각이어야 합니다.' };
   }
   if (targetShape === '직사각형') {
-    if (rightAngles === 4 && !allSidesEqual) return { valid: true, message: `가로×세로가 다른 직사각형입니다.` };
-    if (allSidesEqual) return { valid: false, message: '네 변의 길이가 모두 같아 정사각형이 되었습니다. 가로와 세로 길이를 다르게 하세요.' };
+    if (rightAngles === 4 && !allSidesEqual) return { valid: true, message: '가로와 세로 길이가 다른 직사각형입니다.' };
+    if (allSidesEqual) return { valid: false, message: '네 변의 길이가 모두 같아 정사각형이 되었습니다. 가로와 세로를 다르게 하세요.' };
     return { valid: false, message: '네 각이 모두 직각이어야 합니다.' };
   }
   if (targetShape === '사다리꼴') {
@@ -144,8 +186,34 @@ function verifyQuadrilateral(pts, targetShape) {
   return { valid: true, message: '' };
 }
 
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+// 2D 좌표를 2.5D 아이소메트릭 화면 좌표로 투영
+function toIso(x, y, z = 0) {
+  const gx = x / GRID;
+  const gy = y / GRID;
+  const tileW = 24;
+  const tileH = 12;
+  const originX = 400; // 캔버스 중앙 상단 기준점
+  const originY = 70;
+  return {
+    x: originX + (gx - gy) * (tileW / 2),
+    y: originY + (gx + gy) * (tileH / 2) - z
+  };
+}
+
+// 색상 명도 조절 유틸리티
+function shadeColor(hex, percent) {
+  let num = parseInt(hex.replace('#', ''), 16),
+      amt = Math.round(2.55 * percent),
+      R = (num >> 16) + amt,
+      G = (num >> 8 & 0x00FF) + amt,
+      B = (num & 0x0000FF) + amt;
+  return '#' + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255)).toString(16).slice(1);
+}
+
+// 2D 설계도 렌더링
+function draw2D() {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // 모눈 그리기
   ctx.strokeStyle = '#e0e6ed';
@@ -168,12 +236,24 @@ function draw() {
     ctx.fill();
     ctx.stroke();
 
+    // 각 변의 길이(cm) 표시
+    ctx.fillStyle = '#34495e';
+    ctx.font = '11px Malgun Gothic';
+    ctx.textAlign = 'center';
+    for (let i = 0; i < 4; i++) {
+      const p1 = b.points[i];
+      const p2 = b.points[(i + 1) % 4];
+      const len = Math.hypot((p2.x - p1.x) / GRID, (p2.y - p1.y) / GRID);
+      if (Number.isInteger(len)) {
+        ctx.fillText(`${len}cm`, (p1.x + p2.x) / 2, (p1.y + p2.y) / 2 - 4);
+      }
+    }
+
     // 건물 이름 표시
     const cx = b.points.reduce((s, p) => s + p.x, 0) / 4;
     const cy = b.points.reduce((s, p) => s + p.y, 0) / 4;
     ctx.fillStyle = '#2c3e50';
     ctx.font = 'bold 13px Malgun Gothic';
-    ctx.textAlign = 'center';
     ctx.fillText(b.type, cx, cy + 5);
   });
 
@@ -192,11 +272,137 @@ function draw() {
   }
 }
 
-function undoLast() { buildings.pop(); draw(); }
-function clearAll() { buildings = []; currentPoints = []; draw(); }
+// 2.5D 입체 도시 조감도 렌더링
+function draw3D() {
+  // 하늘 배경 그라데이션
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#dff9fb');
+  grad.addColorStop(1, '#f6e58d');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 도시 대지(잔디 플랫폼) 그리기
+  const p00 = toIso(0, 0, 0);
+  const pW0 = toIso(canvas.width, 0, 0);
+  const pWH = toIso(canvas.width, canvas.height, 0);
+  const p0H = toIso(0, canvas.height, 0);
+
+  // 대지 두께(흙 단면)
+  ctx.fillStyle = '#b38b6d';
+  ctx.beginPath();
+  ctx.moveTo(p0H.x, p0H.y); ctx.lineTo(pWH.x, pWH.y);
+  ctx.lineTo(pWH.x, pWH.y + 18); ctx.lineTo(p0H.x, p0H.y + 18);
+  ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle = '#8c6950';
+  ctx.beginPath();
+  ctx.moveTo(pWH.x, pWH.y); ctx.lineTo(pW0.x, pW0.y);
+  ctx.lineTo(pW0.x, pW0.y + 18); ctx.lineTo(pWH.x, pWH.y + 18);
+  ctx.closePath(); ctx.fill();
+
+  // 대지 윗면(연녹색 잔디)
+  ctx.fillStyle = '#badc58';
+  ctx.beginPath();
+  ctx.moveTo(p00.x, p00.y); ctx.lineTo(pW0.x, pW0.y);
+  ctx.lineTo(pWH.x, pWH.y); ctx.lineTo(p0H.x, p0H.y);
+  ctx.closePath(); ctx.fill();
+
+  // 입체 격자선
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= canvas.width; x += GRID) {
+    const a = toIso(x, 0, 0), b = toIso(x, canvas.height, 0);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  for (let y = 0; y <= canvas.height; y += GRID) {
+    const a = toIso(0, y, 0), b = toIso(canvas.width, y, 0);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+
+  // 화가 알고리즘(Painter's Algorithm): 뒤쪽(x+y가 작은 쪽) 건물부터 먼저 그려 겹침 처리
+  const sortedBuildings = [...buildings].sort((a, b) => {
+    const depthA = a.points.reduce((s, p) => s + p.x + p.y, 0);
+    const depthB = b.points.reduce((s, p) => s + p.x + p.y, 0);
+    return depthA - depthB;
+  });
+
+  sortedBuildings.forEach(b => {
+    const h = b.height;
+    const basePts = b.points.map(p => toIso(p.x, p.y, 0));
+    const topPts = b.points.map(p => toIso(p.x, p.y, h));
+
+    // 1. 기둥(옆면) 그리기
+    for (let i = 0; i < 4; i++) {
+      const next = (i + 1) % 4;
+      ctx.fillStyle = i % 2 === 0 ? shadeColor(b.hex, -15) : shadeColor(b.hex, -30);
+      ctx.strokeStyle = '#2c3e50';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(basePts[i].x, basePts[i].y);
+      ctx.lineTo(basePts[next].x, basePts[next].y);
+      ctx.lineTo(topPts[next].x, topPts[next].y);
+      ctx.lineTo(topPts[i].x, topPts[i].y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // 2. 지붕(윗면) 그리기
+    ctx.fillStyle = shadeColor(b.hex, 15);
+    ctx.strokeStyle = '#2c3e50';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    topPts.forEach((p, idx) => idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // 3. 건물별 디테일 아이콘 및 이름표
+    const cx = topPts.reduce((s, p) => s + p.x, 0) / 4;
+    const cy = topPts.reduce((s, p) => s + p.y, 0) / 4;
+
+    if (b.type === '중앙 공원') {
+      // 공원 나무 아이콘 배치
+      ctx.font = '18px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('🌲🌳🌲', cx, cy + 4);
+    } else if (b.type !== '도로') {
+      const icons = { '시청': '🏛️', '도서관': '📚', '미술관': '🎨' };
+      ctx.font = '18px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(icons[b.type] || '', cx, cy - 2);
+
+      // 건물 이름 배지
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillRect(cx - 28, cy + 4, 56, 16);
+      ctx.fillStyle = '#2c3e50';
+      ctx.font = 'bold 11px Malgun Gothic';
+      ctx.fillText(b.type, cx, cy + 16);
+    }
+  });
+}
+
+function draw() {
+  if (is3DMode) draw3D();
+  else draw2D();
+}
+
+function undoLast() {
+  buildings.pop();
+  currentPoints = [];
+  draw();
+}
+
+function clearAll() {
+  buildings = [];
+  currentPoints = [];
+  if (is3DMode) toggleViewMode();
+  draw();
+}
+
 function downloadImage() {
   const link = document.createElement('a');
-  link.download = '사각형도시_설계도.png';
+  link.download = is3DMode ? '사각형도시_입체조감도.png' : '사각형도시_설계도.png';
   link.href = canvas.toDataURL();
   link.click();
 }
